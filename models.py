@@ -5,6 +5,7 @@ from typing import List, Dict
 import concurrent.futures
 from db import get_active_models
 from network import send_request, APIError
+import logger
 
 
 class Model:

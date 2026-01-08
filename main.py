@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (
     QTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QCheckBox,
     QListWidget, QListWidgetItem, QLineEdit, QLabel, QSplitter,
     QMessageBox, QDialog, QDialogButtonBox, QFormLayout, QComboBox,
-    QHeaderView, QProgressBar, QGroupBox
+    QHeaderView, QProgressBar, QGroupBox, QFileDialog, QSpinBox
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont
@@ -16,6 +16,9 @@ from datetime import datetime
 import db
 import models
 from models import send_prompt_to_models
+import logger
+import json
+import os
 
 
 class ModelDialog(QDialog):
@@ -38,7 +41,7 @@ class ModelDialog(QDialog):
         self.api_url_edit = QLineEdit()
         self.api_id_edit = QLineEdit()
         self.model_type_combo = QComboBox()
-        self.model_type_combo.addItems(["openai", "deepseek", "groq", "other"])
+        self.model_type_combo.addItems(["openai", "deepseek", "groq", "openrouter", "other"])
         self.is_active_checkbox = QCheckBox()
         self.is_active_checkbox.setChecked(True)
         
@@ -103,11 +106,20 @@ class MainWindow(QMainWindow):
     
     def init_database(self):
         """Инициализировать базу данных"""
-        db.init_database()
+        try:
+            db.init_database()
+            logger.log_info("Database initialized")
+        except Exception as e:
+            QMessageBox.critical(self, "Критическая ошибка", f"Не удалось инициализировать БД: {str(e)}")
+            logger.log_error("Database initialization failed", e)
+            raise
     
     def init_ui(self):
         self.setWindowTitle("ChatList - Сравнение ответов нейросетей")
         self.setGeometry(100, 100, 1400, 900)
+        
+        # Создать меню
+        self.create_menu()
         
         # Главный виджет
         central_widget = QWidget()
@@ -136,6 +148,30 @@ class MainWindow(QMainWindow):
         main_splitter.setSizes([300, 800, 300])
         
         main_layout.addWidget(main_splitter)
+    
+    def create_menu(self):
+        """Создать меню приложения"""
+        menubar = self.menuBar()
+        
+        # Меню Файл
+        file_menu = menubar.addMenu("Файл")
+        export_md_action = file_menu.addAction("Экспорт в Markdown")
+        export_md_action.triggered.connect(lambda: self.export_results("markdown"))
+        export_json_action = file_menu.addAction("Экспорт в JSON")
+        export_json_action.triggered.connect(lambda: self.export_results("json"))
+        file_menu.addSeparator()
+        exit_action = file_menu.addAction("Выход")
+        exit_action.triggered.connect(self.close)
+        
+        # Меню Настройки
+        settings_menu = menubar.addMenu("Настройки")
+        app_settings_action = settings_menu.addAction("Настройки приложения")
+        app_settings_action.triggered.connect(self.show_settings_dialog)
+        
+        # Меню Справка
+        help_menu = menubar.addMenu("Справка")
+        about_action = help_menu.addAction("О программе")
+        about_action.triggered.connect(self.show_about)
     
     def create_prompts_panel(self):
         """Создать панель истории промтов"""
@@ -232,6 +268,7 @@ class MainWindow(QMainWindow):
         self.results_table.setColumnWidth(2, 80)
         self.results_table.setAlternatingRowColors(True)
         self.results_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.results_table.setSortingEnabled(True)  # Включить сортировку
         results_layout.addWidget(self.results_table)
         
         # Кнопка сохранения результатов
@@ -337,10 +374,15 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Ошибка", "Промт не может быть пустым!")
             return
         
-        tags = self.tags_input.text().strip()
-        db.create_prompt(prompt_text, tags)
-        self.load_prompts()
-        QMessageBox.information(self, "Успех", "Промт сохранен!")
+        try:
+            tags = self.tags_input.text().strip()
+            db.create_prompt(prompt_text, tags)
+            self.load_prompts()
+            QMessageBox.information(self, "Успех", "Промт сохранен!")
+            logger.log_info(f"Prompt saved: {prompt_text[:50]}...")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить промт: {str(e)}")
+            logger.log_error("Failed to save prompt", e)
     
     def delete_selected_prompt(self):
         """Удалить выбранный промт"""
@@ -452,9 +494,15 @@ class MainWindow(QMainWindow):
         self.save_results_btn.setEnabled(False)
         
         # Получить активные модели
-        active_models = models.get_active_models_list()
-        if not active_models:
-            QMessageBox.warning(self, "Ошибка", "Нет активных моделей!")
+        try:
+            active_models = models.get_active_models_list()
+            if not active_models:
+                QMessageBox.warning(self, "Ошибка", "Нет активных моделей!")
+                logger.log_info("No active models found")
+                return
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Ошибка при загрузке моделей: {str(e)}")
+            logger.log_error("Failed to load models", e)
             return
         
         # Показать прогресс
@@ -488,6 +536,14 @@ class MainWindow(QMainWindow):
             response_text = result['response'] if result['success'] else f"Ошибка: {result['error']}"
             response_item = QTableWidgetItem(response_text)
             self.results_table.setItem(row, 1, response_item)
+            
+            # Логирование
+            logger.log_api_request(
+                result['model_name'],
+                self.prompt_input.toPlainText()[:100],
+                result.get('success', False),
+                result.get('error')
+            )
             
             # Чекбокс
             checkbox = QCheckBox()
@@ -530,13 +586,140 @@ class MainWindow(QMainWindow):
                 })
         
         if results_to_save:
-            db.save_results(results_to_save)
-            QMessageBox.information(self, "Успех", f"Сохранено результатов: {len(results_to_save)}")
+            try:
+                db.save_results(results_to_save)
+                QMessageBox.information(self, "Успех", f"Сохранено результатов: {len(results_to_save)}")
+                logger.log_info(f"Saved {len(results_to_save)} results to database")
+                
+                # Очистить временную таблицу
+                self.temp_results = []
+                self.results_table.setRowCount(0)
+                self.save_results_btn.setEnabled(False)
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить результаты: {str(e)}")
+                logger.log_error("Failed to save results", e)
+    
+    # ========== Методы для экспорта ==========
+    
+    def export_results(self, format_type: str):
+        """Экспортировать результаты в файл"""
+        if not self.temp_results:
+            QMessageBox.warning(self, "Ошибка", "Нет результатов для экспорта!")
+            return
+        
+        if format_type == "markdown":
+            filename, _ = QFileDialog.getSaveFileName(
+                self, "Сохранить как Markdown", "", "Markdown Files (*.md)"
+            )
+            if filename:
+                self.export_to_markdown(filename)
+        elif format_type == "json":
+            filename, _ = QFileDialog.getSaveFileName(
+                self, "Сохранить как JSON", "", "JSON Files (*.json)"
+            )
+            if filename:
+                self.export_to_json(filename)
+    
+    def export_to_markdown(self, filename: str):
+        """Экспортировать результаты в Markdown"""
+        try:
+            prompt_text = self.prompt_input.toPlainText()
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write(f"# Результаты сравнения моделей\n\n")
+                f.write(f"## Промт\n\n{prompt_text}\n\n")
+                f.write(f"## Ответы моделей\n\n")
+                f.write(f"Дата: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                f.write("---\n\n")
+                
+                for result in self.temp_results:
+                    if result.get('success'):
+                        f.write(f"### {result['model_name']}\n\n")
+                        f.write(f"{result['response']}\n\n")
+                        f.write("---\n\n")
+                    else:
+                        f.write(f"### {result['model_name']} (Ошибка)\n\n")
+                        f.write(f"*{result['error']}*\n\n")
+                        f.write("---\n\n")
             
-            # Очистить временную таблицу
-            self.temp_results = []
-            self.results_table.setRowCount(0)
-            self.save_results_btn.setEnabled(False)
+            QMessageBox.information(self, "Успех", f"Результаты экспортированы в {filename}")
+            logger.log_info(f"Exported results to Markdown: {filename}")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Ошибка при экспорте: {str(e)}")
+            logger.log_error("Export to Markdown failed", e)
+    
+    def export_to_json(self, filename: str):
+        """Экспортировать результаты в JSON"""
+        try:
+            export_data = {
+                'prompt': self.prompt_input.toPlainText(),
+                'tags': self.tags_input.text(),
+                'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'results': []
+            }
+            
+            for result in self.temp_results:
+                export_data['results'].append({
+                    'model_name': result['model_name'],
+                    'model_id': result.get('model_id'),
+                    'response': result.get('response', ''),
+                    'success': result.get('success', False),
+                    'error': result.get('error'),
+                    'selected': result.get('selected', False)
+                })
+            
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(export_data, f, ensure_ascii=False, indent=2)
+            
+            QMessageBox.information(self, "Успех", f"Результаты экспортированы в {filename}")
+            logger.log_info(f"Exported results to JSON: {filename}")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Ошибка при экспорте: {str(e)}")
+            logger.log_error("Export to JSON failed", e)
+    
+    # ========== Методы для настроек ==========
+    
+    def show_settings_dialog(self):
+        """Показать диалог настроек"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Настройки")
+        dialog.setModal(True)
+        layout = QFormLayout()
+        
+        # Таймаут запросов
+        timeout_spin = QSpinBox()
+        timeout_spin.setRange(10, 300)
+        timeout_spin.setValue(int(db.get_setting('request_timeout', '30')))
+        layout.addRow("Таймаут запросов (сек):", timeout_spin)
+        
+        # Максимум результатов
+        max_results_spin = QSpinBox()
+        max_results_spin.setRange(1, 100)
+        max_results_spin.setValue(int(db.get_setting('max_results_per_request', '10')))
+        layout.addRow("Максимум результатов:", max_results_spin)
+        
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addRow(buttons)
+        
+        dialog.setLayout(layout)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            db.set_setting('request_timeout', str(timeout_spin.value()))
+            db.set_setting('max_results_per_request', str(max_results_spin.value()))
+            QMessageBox.information(self, "Успех", "Настройки сохранены!")
+            logger.log_info("Settings updated")
+    
+    def show_about(self):
+        """Показать информацию о программе"""
+        QMessageBox.about(
+            self,
+            "О программе ChatList",
+            "ChatList v1.0\n\n"
+            "Приложение для сравнения ответов различных нейросетей.\n\n"
+            "Позволяет отправлять один промт в несколько моделей\n"
+            "и сравнивать их ответы."
+        )
 
 
 def main():

@@ -90,6 +90,47 @@ def send_deepseek_request(model_name: str, prompt: str, api_key: str) -> str:
         raise APIError(f"Invalid DeepSeek API response: {str(e)}")
 
 
+def send_openrouter_request(model_name: str, prompt: str, api_key: str) -> str:
+    """
+    Отправить запрос к OpenRouter API
+    
+    Args:
+        model_name: Название модели (например, 'openai/gpt-4')
+        prompt: Текст промта
+        api_key: API ключ
+    
+    Returns:
+        Текст ответа модели
+    """
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/chatlist-app",  # Опционально
+        "X-Title": "ChatList"  # Опционально
+    }
+    data = {
+        "model": model_name,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.7
+    }
+    
+    try:
+        response = requests.post(
+            url,
+            headers=headers,
+            json=data,
+            timeout=get_request_timeout()
+        )
+        response.raise_for_status()
+        result = response.json()
+        return result['choices'][0]['message']['content']
+    except requests.exceptions.RequestException as e:
+        raise APIError(f"OpenRouter API error: {str(e)}")
+    except (KeyError, IndexError) as e:
+        raise APIError(f"Invalid OpenRouter API response: {str(e)}")
+
+
 def send_groq_request(model_name: str, prompt: str, api_key: str) -> str:
     """
     Отправить запрос к Groq API
@@ -151,7 +192,9 @@ def send_request(model: Dict, prompt: str) -> str:
     model_name = model.get('name', '')
     
     # Определяем тип API и вызываем соответствующую функцию
-    if 'openai' in model_type or 'openai' in model.get('api_url', '').lower():
+    if 'openrouter' in model_type or 'openrouter' in model.get('api_url', '').lower():
+        return send_openrouter_request(model_name, prompt, api_key)
+    elif 'openai' in model_type or 'openai' in model.get('api_url', '').lower():
         return send_openai_request(model_name, prompt, api_key)
     elif 'deepseek' in model_type or 'deepseek' in model.get('api_url', '').lower():
         return send_deepseek_request(model_name, prompt, api_key)
