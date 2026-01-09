@@ -122,11 +122,33 @@ def send_openrouter_request(model_name: str, prompt: str, api_key: str) -> str:
             json=data,
             timeout=get_request_timeout()
         )
+        
+        # Улучшенная обработка ошибок
+        if response.status_code == 404:
+            error_data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
+            error_msg = error_data.get('error', {}).get('message', 'Model not found')
+            raise APIError(f"OpenRouter API error: Model '{model_name}' not found (404). {error_msg}")
+        
         response.raise_for_status()
         result = response.json()
+        
+        # Проверка наличия ответа
+        if 'choices' not in result or len(result['choices']) == 0:
+            raise APIError(f"OpenRouter API error: No response from model '{model_name}'")
+        
         return result['choices'][0]['message']['content']
+    except APIError:
+        raise
     except requests.exceptions.RequestException as e:
-        raise APIError(f"OpenRouter API error: {str(e)}")
+        error_msg = str(e)
+        if hasattr(e, 'response') and e.response is not None:
+            try:
+                error_data = e.response.json()
+                if 'error' in error_data:
+                    error_msg = error_data['error'].get('message', error_msg)
+            except:
+                pass
+        raise APIError(f"OpenRouter API error: {error_msg}")
     except (KeyError, IndexError) as e:
         raise APIError(f"Invalid OpenRouter API response: {str(e)}")
 
@@ -190,16 +212,49 @@ def send_request(model: Dict, prompt: str) -> str:
     
     model_type = model.get('model_type', '').lower()
     model_name = model.get('name', '')
+    api_url = model.get('api_url', '').lower()
     
     # Определяем тип API и вызываем соответствующую функцию
-    if 'openrouter' in model_type or 'openrouter' in model.get('api_url', '').lower():
+    # Порядок важен - более специфичные проверки первыми
+    
+    if 'openrouter' in model_type or 'openrouter' in api_url:
         return send_openrouter_request(model_name, prompt, api_key)
-    elif 'openai' in model_type or 'openai' in model.get('api_url', '').lower():
+    elif 'openai' in model_type or 'openai' in api_url or 'azure-openai' in model_type:
         return send_openai_request(model_name, prompt, api_key)
-    elif 'deepseek' in model_type or 'deepseek' in model.get('api_url', '').lower():
+    elif 'deepseek' in model_type or 'deepseek' in api_url:
         return send_deepseek_request(model_name, prompt, api_key)
-    elif 'groq' in model_type or 'groq' in model.get('api_url', '').lower():
+    elif 'groq' in model_type or 'groq' in api_url:
         return send_groq_request(model_name, prompt, api_key)
+    elif 'anthropic' in model_type or 'anthropic' in api_url:
+        # Anthropic Claude использует свой формат, но может быть через прокси
+        return send_generic_request(model, prompt, api_key)
+    elif 'google' in model_type or 'google' in api_url or 'gemini' in api_url:
+        # Google Gemini через OpenAI-совместимый API
+        return send_generic_request(model, prompt, api_key)
+    elif 'mistral' in model_type or 'mistral' in api_url:
+        # Mistral через OpenAI-совместимый API
+        return send_generic_request(model, prompt, api_key)
+    elif 'cohere' in model_type or 'cohere' in api_url:
+        # Cohere через OpenAI-совместимый API
+        return send_generic_request(model, prompt, api_key)
+    elif 'perplexity' in model_type or 'perplexity' in api_url:
+        # Perplexity через OpenAI-совместимый API
+        return send_generic_request(model, prompt, api_key)
+    elif 'together' in model_type or 'together' in api_url:
+        # Together AI через OpenAI-совместимый API
+        return send_generic_request(model, prompt, api_key)
+    elif 'replicate' in model_type or 'replicate' in api_url:
+        # Replicate через OpenAI-совместимый API
+        return send_generic_request(model, prompt, api_key)
+    elif 'huggingface' in model_type or 'huggingface' in api_url or 'hf.co' in api_url:
+        # Hugging Face Inference API через OpenAI-совместимый формат
+        return send_generic_request(model, prompt, api_key)
+    elif 'ollama' in model_type or 'ollama' in api_url:
+        # Ollama локальные модели через OpenAI-совместимый API
+        return send_generic_request(model, prompt, api_key)
+    elif 'localai' in model_type or 'localai' in api_url or 'local' in model_type:
+        # LocalAI через OpenAI-совместимый API
+        return send_generic_request(model, prompt, api_key)
     else:
         # Попытка универсального запроса для совместимых API
         return send_generic_request(model, prompt, api_key)

@@ -8,10 +8,11 @@ from PyQt5.QtWidgets import (
     QTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QCheckBox,
     QListWidget, QListWidgetItem, QLineEdit, QLabel, QSplitter,
     QMessageBox, QDialog, QDialogButtonBox, QFormLayout, QComboBox,
-    QHeaderView, QProgressBar, QGroupBox, QFileDialog, QSpinBox
+    QHeaderView, QProgressBar, QGroupBox, QFileDialog, QSpinBox,
+    QStyledItemDelegate, QTextBrowser, QMenu
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QFont
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QSize
+from PyQt5.QtGui import QFont, QColor
 from datetime import datetime
 import db
 import models
@@ -19,6 +20,108 @@ from models import send_prompt_to_models
 import logger
 import json
 import os
+import markdown
+
+
+class MarkdownViewerDialog(QDialog):
+    """Диалог для просмотра ответа в форматированном markdown"""
+    
+    def __init__(self, parent=None, model_name="", response_text=""):
+        super().__init__(parent)
+        self.setWindowTitle(f"Ответ модели: {model_name}")
+        self.setModal(True)
+        self.resize(800, 600)
+        self.init_ui(model_name, response_text)
+    
+    def init_ui(self, model_name, response_text):
+        layout = QVBoxLayout()
+        
+        # Заголовок с названием модели
+        header_label = QLabel(f"<h2>{model_name}</h2>")
+        layout.addWidget(header_label)
+        
+        # Текстовый браузер для отображения HTML (конвертированный markdown)
+        self.text_browser = QTextBrowser()
+        self.text_browser.setOpenExternalLinks(True)
+        
+        # Конвертировать markdown в HTML
+        try:
+            # Попробовать с расширениями, если не получится - без них
+            try:
+                html_content = markdown.markdown(
+                    response_text,
+                    extensions=['extra', 'codehilite', 'tables', 'fenced_code']
+                )
+            except:
+                # Если расширения недоступны, использовать базовый markdown
+                html_content = markdown.markdown(response_text)
+            # Добавить базовые стили для лучшего отображения
+            styled_html = f"""
+            <style>
+                body {{
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                    line-height: 1.6;
+                    color: #333;
+                    padding: 20px;
+                }}
+                pre {{
+                    background-color: #f4f4f4;
+                    border: 1px solid #ddd;
+                    border-radius: 4px;
+                    padding: 10px;
+                    overflow-x: auto;
+                }}
+                code {{
+                    background-color: #f4f4f4;
+                    padding: 2px 4px;
+                    border-radius: 3px;
+                    font-family: 'Courier New', monospace;
+                }}
+                pre code {{
+                    background-color: transparent;
+                    padding: 0;
+                }}
+                table {{
+                    border-collapse: collapse;
+                    width: 100%;
+                    margin: 10px 0;
+                }}
+                table th, table td {{
+                    border: 1px solid #ddd;
+                    padding: 8px;
+                    text-align: left;
+                }}
+                table th {{
+                    background-color: #f2f2f2;
+                    font-weight: bold;
+                }}
+                blockquote {{
+                    border-left: 4px solid #ddd;
+                    margin: 0;
+                    padding-left: 20px;
+                    color: #666;
+                }}
+                h1, h2, h3, h4, h5, h6 {{
+                    margin-top: 20px;
+                    margin-bottom: 10px;
+                }}
+            </style>
+            {html_content}
+            """
+            self.text_browser.setHtml(styled_html)
+        except Exception as e:
+            # Если ошибка конвертации, показать как обычный текст
+            self.text_browser.setPlainText(response_text)
+            logger.log_error(f"Error converting markdown to HTML: {str(e)}")
+        
+        layout.addWidget(self.text_browser)
+        
+        # Кнопки
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.rejected.connect(self.close)
+        layout.addWidget(buttons)
+        
+        self.setLayout(layout)
 
 
 class ModelDialog(QDialog):
@@ -37,15 +140,71 @@ class ModelDialog(QDialog):
     def init_ui(self):
         layout = QFormLayout()
         
+        # Список популярных бесплатных моделей
+        preset_label = QLabel("Выбрать из популярных бесплатных моделей:")
+        self.preset_combo = QComboBox()
+        self.preset_combo.addItem("-- Выберите модель --", None)
+        
+        # Бесплатные модели OpenRouter (проверенные и работающие)
+        free_models = [
+            # Meta Llama модели (бесплатные)
+            ("meta-llama/llama-3.3-70b-instruct:free", "Meta Llama 3.3 70B Instruct (OpenRouter, бесплатно)"),
+            ("meta-llama/llama-3.1-405b-instruct:free", "Meta Llama 3.1 405B Instruct (OpenRouter, бесплатно)"),
+            ("meta-llama/llama-3.2-3b-instruct:free", "Meta Llama 3.2 3B Instruct (OpenRouter, бесплатно)"),
+            # Xiaomi модели (бесплатные)
+            ("xiaomi/mimo-v2-flash:free", "Xiaomi MiMo V2 Flash (OpenRouter, бесплатно)"),
+            # NVIDIA модели (бесплатные)
+            ("nvidia/nemotron-3-nano-30b-a3b:free", "NVIDIA Nemotron 3 Nano 30B (OpenRouter, бесплатно)"),
+            # Nous Research модели (бесплатные)
+            ("nousresearch/hermes-3-llama-3.1-405b:free", "Nous Hermes 3 405B (OpenRouter, бесплатно)"),
+            # Google модели (бесплатные)
+            ("google/gemini-flash-1.5-8b:free", "Google Gemini Flash 1.5 8B (OpenRouter, бесплатно)"),
+            # ByteDance модели (работает, но может требовать кредиты)
+            ("bytedance-seed/seed-1.6-flash", "ByteDance Seed 1.6 Flash (OpenRouter)"),
+        ]
+        
+        for model_id, display_name in free_models:
+            self.preset_combo.addItem(display_name, {
+                'name': model_id,
+                'api_url': 'https://openrouter.ai/api/v1/chat/completions',
+                'api_id': 'OPENROUTER_API_KEY',
+                'model_type': 'openrouter'
+            })
+        
+        self.preset_combo.currentIndexChanged.connect(self.on_preset_changed)
+        layout.addRow(preset_label)
+        layout.addRow(self.preset_combo)
+        
+        # Разделитель
+        separator = QLabel("─" * 40)
+        layout.addRow(separator)
+        
         self.name_edit = QLineEdit()
         self.api_url_edit = QLineEdit()
         self.api_id_edit = QLineEdit()
         self.model_type_combo = QComboBox()
-        self.model_type_combo.addItems(["openai", "deepseek", "groq", "openrouter", "other"])
+        self.model_type_combo.addItems([
+            "openai",
+            "openrouter",
+            "deepseek",
+            "groq",
+            "anthropic",
+            "google",
+            "mistral",
+            "cohere",
+            "perplexity",
+            "together",
+            "replicate",
+            "huggingface",
+            "azure-openai",
+            "ollama",
+            "localai",
+            "other"
+        ])
         self.is_active_checkbox = QCheckBox()
         self.is_active_checkbox.setChecked(True)
         
-        layout.addRow("Название:", self.name_edit)
+        layout.addRow("Название модели:", self.name_edit)
         layout.addRow("API URL:", self.api_url_edit)
         layout.addRow("API Key (env var):", self.api_id_edit)
         layout.addRow("Тип модели:", self.model_type_combo)
@@ -57,6 +216,18 @@ class ModelDialog(QDialog):
         layout.addRow(buttons)
         
         self.setLayout(layout)
+    
+    def on_preset_changed(self, index):
+        """Обработчик выбора предустановленной модели"""
+        if index > 0:  # Не первый элемент "-- Выберите модель --"
+            preset_data = self.preset_combo.currentData()
+            if preset_data:
+                self.name_edit.setText(preset_data['name'])
+                self.api_url_edit.setText(preset_data['api_url'])
+                self.api_id_edit.setText(preset_data['api_id'])
+                model_type_index = self.model_type_combo.findText(preset_data['model_type'])
+                if model_type_index >= 0:
+                    self.model_type_combo.setCurrentIndex(model_type_index)
     
     def load_model_data(self):
         if self.model_data:
@@ -262,20 +433,56 @@ class MainWindow(QMainWindow):
         self.results_table = QTableWidget()
         self.results_table.setColumnCount(3)
         self.results_table.setHorizontalHeaderLabels(["Модель", "Ответ", "Выбрано"])
-        self.results_table.horizontalHeader().setStretchLastSection(True)
-        self.results_table.setColumnWidth(0, 150)
-        self.results_table.setColumnWidth(1, 500)
-        self.results_table.setColumnWidth(2, 80)
+        self.results_table.horizontalHeader().setStretchLastSection(False)
+        self.results_table.setColumnWidth(0, 200)  # Модель - немного шире для длинных имен
+        self.results_table.setColumnWidth(1, 600)  # Ответ - основное пространство
+        self.results_table.setColumnWidth(2, 50)   # Выбрано - узкая колонка
+        self.results_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)  # Ответ растягивается
         self.results_table.setAlternatingRowColors(True)
         self.results_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.results_table.setSortingEnabled(True)  # Включить сортировку
+        # Настройка для многострочного отображения
+        self.results_table.setWordWrap(True)  # Включить перенос текста
+        self.results_table.setTextElideMode(Qt.ElideNone)  # Не обрезать текст
+        # Обработчик выбора строки для активации кнопки
+        self.results_table.itemSelectionChanged.connect(self.on_results_selection_changed)
+        
+        # Делегат для колонки с ответами (многострочный текст)
+        class WordWrapDelegate(QStyledItemDelegate):
+            def sizeHint(self, option, index):
+                size = super().sizeHint(option, index)
+                text = index.data(Qt.DisplayRole) or ""
+                if text:
+                    # Вычислить высоту с учетом переноса текста
+                    font_metrics = option.fontMetrics
+                    text_width = option.rect.width() - 20  # Отступы
+                    if text_width > 0:
+                        wrapped_text = font_metrics.boundingRect(
+                            0, 0, text_width, 0,
+                            Qt.TextWordWrap | Qt.AlignTop,
+                            text
+                        )
+                        size.setHeight(max(60, wrapped_text.height() + 20))
+                return size
+        
+        # Применить делегат только к колонке с ответами (колонка 1)
+        self.results_table.setItemDelegateForColumn(1, WordWrapDelegate(self.results_table))
         results_layout.addWidget(self.results_table)
         
-        # Кнопка сохранения результатов
+        # Кнопки управления результатами
+        buttons_layout = QHBoxLayout()
+        
+        self.open_markdown_btn = QPushButton("Открыть в Markdown")
+        self.open_markdown_btn.clicked.connect(self.open_selected_markdown)
+        self.open_markdown_btn.setEnabled(False)
+        buttons_layout.addWidget(self.open_markdown_btn)
+        
         self.save_results_btn = QPushButton("Сохранить выбранные результаты")
         self.save_results_btn.clicked.connect(self.save_selected_results)
         self.save_results_btn.setEnabled(False)
-        results_layout.addWidget(self.save_results_btn)
+        buttons_layout.addWidget(self.save_results_btn)
+        
+        results_layout.addLayout(buttons_layout)
         
         results_group.setLayout(results_layout)
         layout.addWidget(results_group)
@@ -521,44 +728,131 @@ class MainWindow(QMainWindow):
         self.progress_bar.setVisible(False)
         self.send_btn.setEnabled(True)
         
-        # Сохранить результаты во временную таблицу
-        self.temp_results = results
+        # Сохранить результаты во временную таблицу с правильным сопоставлением
+        self.temp_results = []
         
         # Отобразить в таблице
         self.results_table.setRowCount(len(results))
         
         for row, result in enumerate(results):
-            # Модель
-            model_item = QTableWidgetItem(result['model_name'])
+            # Убедиться, что данные правильно сопоставлены
+            model_name = result.get('model_name', f'Модель {row+1}')
+            model_id = result.get('model_id', None)
+            response_text = result.get('response', '')
+            success = result.get('success', False)
+            error = result.get('error', '')
+            
+            # Сохранить в temp_results с правильным сопоставлением
+            temp_result = {
+                'model_id': model_id,
+                'model_name': model_name,
+                'response': response_text if success else '',
+                'error': error if not success else '',
+                'success': success,
+                'selected': False
+            }
+            self.temp_results.append(temp_result)
+            
+            # Модель - колонка 0 (выравнивание по верхнему краю)
+            model_item = QTableWidgetItem(model_name)
+            model_item.setTextAlignment(Qt.AlignTop | Qt.AlignLeft)  # Выравнивание сверху слева
+            model_item.setToolTip(model_name)  # Подсказка при наведении
             self.results_table.setItem(row, 0, model_item)
             
-            # Ответ
-            response_text = result['response'] if result['success'] else f"Ошибка: {result['error']}"
-            response_item = QTableWidgetItem(response_text)
+            # Ответ - колонка 1 (многострочный)
+            if success:
+                response_item = QTableWidgetItem(response_text)
+            else:
+                response_item = QTableWidgetItem(f"Ошибка: {error}")
+                response_item.setForeground(Qt.red)  # Красный цвет для ошибок
+            
+            # Настройка для многострочного отображения
+            response_item.setTextAlignment(Qt.AlignTop | Qt.AlignLeft)  # Выравнивание сверху слева
+            
+            # Подсказка с полным текстом
+            full_text = response_text if success else f"Ошибка: {error}"
+            response_item.setToolTip(full_text[:1000] if len(full_text) > 1000 else full_text)
+            
             self.results_table.setItem(row, 1, response_item)
             
             # Логирование
             logger.log_api_request(
-                result['model_name'],
+                model_name,
                 self.prompt_input.toPlainText()[:100],
-                result.get('success', False),
-                result.get('error')
+                success,
+                error if not success else None
             )
             
-            # Чекбокс
+            # Чекбокс - колонка 2 (выравнивание по верхнему краю)
             checkbox = QCheckBox()
             checkbox.setChecked(False)
+            # Используем замыкание для правильного сохранения индекса строки
             checkbox.stateChanged.connect(lambda state, r=row: self.on_checkbox_changed(r, state))
-            self.results_table.setCellWidget(row, 2, checkbox)
+            # Создать контейнер для выравнивания чекбокса по верху
+            checkbox_widget = QWidget()
+            checkbox_layout = QVBoxLayout()
+            checkbox_layout.setContentsMargins(0, 0, 0, 0)
+            checkbox_layout.addWidget(checkbox)
+            checkbox_layout.addStretch()  # Растянуть пространство вниз для выравнивания по верху
+            checkbox_widget.setLayout(checkbox_layout)
+            self.results_table.setCellWidget(row, 2, checkbox_widget)
         
-        self.results_table.resizeRowsToContents()
+        # Автоматически подогнать высоту строк под содержимое (с учетом многострочного текста)
+        for row in range(self.results_table.rowCount()):
+            self.results_table.resizeRowToContents(row)
+            # Убедиться, что минимальная высота достаточна
+            current_height = self.results_table.rowHeight(row)
+            if current_height < 60:
+                self.results_table.setRowHeight(row, 60)
+        
         self.save_results_btn.setEnabled(True)
-        self.statusBar().showMessage("Запросы завершены", 3000)
+        self.open_markdown_btn.setEnabled(False)  # Будет активирована при выборе строки
+        self.statusBar().showMessage(f"Запросы завершены. Получено ответов: {sum(1 for r in results if r.get('success', False))}/{len(results)}", 3000)
     
     def on_checkbox_changed(self, row, state):
         """Обработчик изменения чекбокса"""
         if row < len(self.temp_results):
             self.temp_results[row]['selected'] = (state == Qt.Checked)
+    
+    def on_results_selection_changed(self):
+        """Обработчик изменения выбора строки в таблице результатов"""
+        selected_rows = self.results_table.selectionModel().selectedRows()
+        if selected_rows:
+            row = selected_rows[0].row()
+            if row >= 0 and row < len(self.temp_results):
+                result = self.temp_results[row]
+                # Активировать кнопку только если ответ успешный
+                self.open_markdown_btn.setEnabled(result.get('success', False))
+            else:
+                self.open_markdown_btn.setEnabled(False)
+        else:
+            self.open_markdown_btn.setEnabled(False)
+    
+    def open_selected_markdown(self):
+        """Открыть диалог просмотра markdown для выбранной строки"""
+        selected_rows = self.results_table.selectionModel().selectedRows()
+        if not selected_rows:
+            QMessageBox.warning(self, "Ошибка", "Выберите строку с ответом для просмотра")
+            return
+        
+        row = selected_rows[0].row()
+        self.open_markdown_viewer(row)
+    
+    def open_markdown_viewer(self, row):
+        """Открыть диалог просмотра markdown для выбранной строки"""
+        if row < 0 or row >= len(self.temp_results):
+            return
+        
+        result = self.temp_results[row]
+        model_name = result.get('model_name', 'Неизвестная модель')
+        response_text = result.get('response', '')
+        
+        if not response_text:
+            QMessageBox.warning(self, "Ошибка", "Нет ответа для отображения")
+            return
+        
+        dialog = MarkdownViewerDialog(self, model_name, response_text)
+        dialog.exec_()
     
     def save_selected_results(self):
         """Сохранить выбранные результаты в БД"""
