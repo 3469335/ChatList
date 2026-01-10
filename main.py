@@ -12,7 +12,7 @@ from PyQt5.QtWidgets import (
     QStyledItemDelegate, QTextBrowser, QMenu
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QSize
-from PyQt5.QtGui import QFont, QColor
+from PyQt5.QtGui import QFont, QColor, QIcon, QPalette
 from datetime import datetime
 import db
 import models
@@ -21,6 +21,8 @@ import logger
 import json
 import os
 import markdown
+from prompt_improver import improve_prompt, APIError as PromptImproverError
+from config import get_api_key
 
 
 class MarkdownViewerDialog(QDialog):
@@ -265,6 +267,244 @@ class RequestThread(QThread):
         self.finished.emit(results)
 
 
+class PromptImprovementThread(QThread):
+    """Поток для асинхронного улучшения промта"""
+    finished = pyqtSignal(dict)  # Результат: {'improved': str, 'variants': list}
+    error = pyqtSignal(str)  # Сообщение об ошибке
+    progress = pyqtSignal(str)
+    
+    def __init__(self, prompt_text, model_name, api_key, task_type='general'):
+        super().__init__()
+        self.prompt_text = prompt_text
+        self.model_name = model_name
+        self.api_key = api_key
+        self.task_type = task_type
+    
+    def run(self):
+        try:
+            self.progress.emit("Улучшение промта...")
+            result = improve_prompt(self.prompt_text, self.model_name, self.api_key, self.task_type)
+            self.finished.emit(result)
+        except PromptImproverError as e:
+            self.error.emit(str(e))
+        except Exception as e:
+            self.error.emit(f"Неожиданная ошибка: {str(e)}")
+
+
+class PromptImprovementDialog(QDialog):
+    """Диалог для улучшения промтов"""
+    
+    def __init__(self, parent=None, original_prompt=""):
+        super().__init__(parent)
+        self.original_prompt = original_prompt
+        self.selected_prompt = None  # Выбранный пользователем промт для подстановки
+        self.setWindowTitle("Улучшить промт")
+        self.setModal(True)
+        self.resize(900, 700)
+        self.improvement_thread = None
+        self.init_ui()
+        self.load_models()
+        
+    def init_ui(self):
+        layout = QVBoxLayout()
+        
+        # Исходный промт
+        original_group = QGroupBox("Исходный промт")
+        original_layout = QVBoxLayout()
+        self.original_text = QTextEdit()
+        self.original_text.setPlainText(self.original_prompt)
+        self.original_text.setReadOnly(True)
+        self.original_text.setMaximumHeight(100)
+        original_layout.addWidget(self.original_text)
+        original_group.setLayout(original_layout)
+        layout.addWidget(original_group)
+        
+        # Выбор модели и типа адаптации
+        settings_group = QGroupBox("Настройки улучшения")
+        settings_layout = QFormLayout()
+        
+        self.model_combo = QComboBox()
+        settings_layout.addRow("Модель для улучшения:", self.model_combo)
+        
+        self.task_type_combo = QComboBox()
+        self.task_type_combo.addItem("Общее улучшение", "general")
+        self.task_type_combo.addItem("Код (программирование)", "code")
+        self.task_type_combo.addItem("Анализ", "analysis")
+        self.task_type_combo.addItem("Креатив", "creative")
+        settings_layout.addRow("Тип адаптации:", self.task_type_combo)
+        
+        settings_group.setLayout(settings_layout)
+        layout.addWidget(settings_group)
+        
+        # Индикатор загрузки
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar)
+        
+        # Улучшенный промт
+        improved_group = QGroupBox("Улучшенный промт")
+        improved_layout = QVBoxLayout()
+        self.improved_text = QTextEdit()
+        self.improved_text.setReadOnly(True)
+        improved_layout.addWidget(self.improved_text)
+        improved_btn_layout = QHBoxLayout()
+        self.use_improved_btn = QPushButton("Подставить в поле ввода")
+        self.use_improved_btn.clicked.connect(lambda: self.use_prompt(self.improved_text.toPlainText()))
+        self.use_improved_btn.setEnabled(False)
+        improved_btn_layout.addWidget(self.use_improved_btn)
+        improved_layout.addLayout(improved_btn_layout)
+        improved_group.setLayout(improved_layout)
+        layout.addWidget(improved_group)
+        
+        # Альтернативные варианты
+        variants_group = QGroupBox("Альтернативные варианты")
+        variants_layout = QVBoxLayout()
+        self.variants_list = QListWidget()
+        variants_layout.addWidget(self.variants_list)
+        variants_btn_layout = QHBoxLayout()
+        self.use_variant_btn = QPushButton("Подставить выбранный вариант")
+        self.use_variant_btn.clicked.connect(self.use_selected_variant)
+        self.use_variant_btn.setEnabled(False)
+        variants_btn_layout.addWidget(self.use_variant_btn)
+        variants_layout.addLayout(variants_btn_layout)
+        variants_group.setLayout(variants_layout)
+        layout.addWidget(variants_group)
+        
+        # Кнопки
+        button_layout = QHBoxLayout()
+        self.improve_btn = QPushButton("Улучшить промт")
+        self.improve_btn.clicked.connect(self.start_improvement)
+        button_layout.addWidget(self.improve_btn)
+        
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        button_layout.addWidget(buttons)
+        
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+        
+        # Обработчик выбора варианта
+        self.variants_list.itemSelectionChanged.connect(self.on_variant_selected)
+    
+    def load_models(self):
+        """Загрузить список доступных моделей"""
+        try:
+            models_list = db.get_active_models()
+            self.model_combo.clear()
+            
+            if not models_list:
+                QMessageBox.warning(self, "Предупреждение", "Нет доступных активных моделей. Добавьте модели в настройках.")
+                return
+            
+            # Добавляем только модели OpenRouter (они поддерживают системные промпты)
+            for model in models_list:
+                if 'openrouter' in model.get('api_url', '').lower() or model.get('model_type', '').lower() == 'openrouter':
+                    self.model_combo.addItem(model['name'], model)
+            
+            if self.model_combo.count() == 0:
+                QMessageBox.warning(self, "Предупреждение", 
+                                  "Нет доступных моделей OpenRouter. Функция улучшения промтов работает только с OpenRouter моделями.")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить модели: {str(e)}")
+    
+    def on_variant_selected(self):
+        """Обработчик выбора варианта"""
+        self.use_variant_btn.setEnabled(self.variants_list.currentItem() is not None)
+    
+    def use_selected_variant(self):
+        """Подставить выбранный вариант"""
+        current_item = self.variants_list.currentItem()
+        if current_item:
+            self.selected_prompt = current_item.text()
+            self.accept()
+    
+    def use_prompt(self, prompt_text):
+        """Подставить промт"""
+        self.selected_prompt = prompt_text
+        self.accept()
+    
+    def start_improvement(self):
+        """Начать улучшение промта"""
+        if not self.original_prompt or not self.original_prompt.strip():
+            QMessageBox.warning(self, "Предупреждение", "Исходный промт не может быть пустым!")
+            return
+        
+        if self.model_combo.count() == 0:
+            QMessageBox.warning(self, "Предупреждение", "Нет доступных моделей для улучшения!")
+            return
+        
+        # Получить выбранную модель
+        model_data = self.model_combo.currentData()
+        if not model_data:
+            QMessageBox.warning(self, "Предупреждение", "Выберите модель для улучшения!")
+            return
+        
+        model_name = model_data['name']
+        api_id = model_data['api_id']
+        api_key = get_api_key(api_id)
+        
+        if not api_key:
+            QMessageBox.critical(self, "Ошибка", f"API ключ не найден для переменной {api_id}. Проверьте файл .env")
+            return
+        
+        # Получить тип задачи
+        task_type = self.task_type_combo.currentData()
+        
+        # Заблокировать UI
+        self.improve_btn.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)  # Неопределенный прогресс
+        self.improved_text.clear()
+        self.variants_list.clear()
+        
+        # Запустить поток улучшения
+        self.improvement_thread = PromptImprovementThread(
+            self.original_prompt,
+            model_name,
+            api_key,
+            task_type
+        )
+        self.improvement_thread.finished.connect(self.on_improvement_finished)
+        self.improvement_thread.error.connect(self.on_improvement_error)
+        self.improvement_thread.progress.connect(lambda msg: self.progress_bar.setFormat(msg))
+        self.improvement_thread.start()
+    
+    def on_improvement_finished(self, result):
+        """Обработчик завершения улучшения"""
+        self.progress_bar.setVisible(False)
+        self.improve_btn.setEnabled(True)
+        
+        improved = result.get('improved', '')
+        variants = result.get('variants', [])
+        
+        # Отобразить улучшенный промт
+        self.improved_text.setPlainText(improved)
+        self.use_improved_btn.setEnabled(bool(improved))
+        
+        # Отобразить варианты
+        self.variants_list.clear()
+        for i, variant in enumerate(variants, 1):
+            item = QListWidgetItem(f"Вариант {i}: {variant}")
+            item.setData(Qt.UserRole, variant)
+            self.variants_list.addItem(item)
+        
+        if variants:
+            QMessageBox.information(self, "Успех", f"Промт улучшен! Получено {len(variants)} альтернативных вариантов.")
+        else:
+            QMessageBox.information(self, "Успех", "Промт улучшен!")
+    
+    def on_improvement_error(self, error_msg):
+        """Обработчик ошибки улучшения"""
+        self.progress_bar.setVisible(False)
+        self.improve_btn.setEnabled(True)
+        QMessageBox.critical(self, "Ошибка", f"Не удалось улучшить промт:\n{error_msg}")
+    
+    def get_selected_prompt(self):
+        """Получить выбранный промт для подстановки"""
+        return self.selected_prompt
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -288,6 +528,14 @@ class MainWindow(QMainWindow):
     def init_ui(self):
         self.setWindowTitle("ChatList - Сравнение ответов нейросетей")
         self.setGeometry(100, 100, 1400, 900)
+        
+        # Установить иконку окна
+        icon_path = os.path.join(os.path.dirname(__file__), "app.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+        
+        # Применить настройки темы и шрифта
+        self.apply_settings()
         
         # Создать меню
         self.create_menu()
@@ -409,10 +657,13 @@ class MainWindow(QMainWindow):
         
         # Кнопки
         btn_layout = QHBoxLayout()
+        self.improve_btn = QPushButton("Улучшить промт")
+        self.improve_btn.clicked.connect(self.improve_prompt)
         self.send_btn = QPushButton("Отправить")
         self.send_btn.clicked.connect(self.send_prompt)
         self.save_prompt_btn = QPushButton("Сохранить промт")
         self.save_prompt_btn.clicked.connect(self.save_prompt)
+        btn_layout.addWidget(self.improve_btn)
         btn_layout.addWidget(self.send_btn)
         btn_layout.addWidget(self.save_prompt_btn)
         prompt_layout.addLayout(btn_layout)
@@ -573,6 +824,20 @@ class MainWindow(QMainWindow):
                     self.prompt_input.setPlainText(prompt['prompt'])
                     self.tags_input.setText(prompt.get('tags', ''))
                     self.current_prompt_id = prompt_id
+    
+    def improve_prompt(self):
+        """Открыть диалог улучшения промта"""
+        prompt_text = self.prompt_input.toPlainText().strip()
+        if not prompt_text:
+            QMessageBox.warning(self, "Предупреждение", "Введите промт для улучшения!")
+            return
+        
+        dialog = PromptImprovementDialog(self, prompt_text)
+        if dialog.exec_() == QDialog.Accepted:
+            selected_prompt = dialog.get_selected_prompt()
+            if selected_prompt:
+                self.prompt_input.setPlainText(selected_prompt)
+                logger.log_info("Improved prompt applied to input field")
     
     def save_prompt(self):
         """Сохранить промт в БД"""
@@ -972,52 +1237,190 @@ class MainWindow(QMainWindow):
     
     # ========== Методы для настроек ==========
     
+    def apply_settings(self):
+        """Применить настройки темы и шрифта"""
+        # Применить тему
+        theme = db.get_setting('theme', 'light')
+        self.apply_theme(theme)
+        
+        # Применить размер шрифта
+        font_size = int(db.get_setting('font_size', '10'))
+        self.apply_font_size(font_size)
+    
+    def apply_theme(self, theme: str):
+        """Применить тему (light/dark)"""
+        app = QApplication.instance()
+        if theme == 'dark':
+            # Темная тема
+            app.setStyle('Fusion')
+            palette = QPalette()
+            palette.setColor(QPalette.Window, QColor(53, 53, 53))
+            palette.setColor(QPalette.WindowText, Qt.white)
+            palette.setColor(QPalette.Base, QColor(25, 25, 25))
+            palette.setColor(QPalette.AlternateBase, QColor(53, 53, 53))
+            palette.setColor(QPalette.ToolTipBase, Qt.white)
+            palette.setColor(QPalette.ToolTipText, Qt.white)
+            palette.setColor(QPalette.Text, Qt.white)
+            palette.setColor(QPalette.Button, QColor(53, 53, 53))
+            palette.setColor(QPalette.ButtonText, Qt.white)
+            palette.setColor(QPalette.BrightText, Qt.red)
+            palette.setColor(QPalette.Link, QColor(42, 130, 218))
+            palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
+            palette.setColor(QPalette.HighlightedText, Qt.black)
+            app.setPalette(palette)
+        else:
+            # Светлая тема (по умолчанию)
+            app.setStyle('Fusion')
+            palette = QPalette()
+            palette.setColor(QPalette.Window, QColor(240, 240, 240))
+            palette.setColor(QPalette.WindowText, Qt.black)
+            palette.setColor(QPalette.Base, Qt.white)
+            palette.setColor(QPalette.AlternateBase, QColor(233, 233, 233))
+            palette.setColor(QPalette.ToolTipBase, Qt.white)
+            palette.setColor(QPalette.ToolTipText, Qt.black)
+            palette.setColor(QPalette.Text, Qt.black)
+            palette.setColor(QPalette.Button, QColor(240, 240, 240))
+            palette.setColor(QPalette.ButtonText, Qt.black)
+            palette.setColor(QPalette.BrightText, Qt.red)
+            palette.setColor(QPalette.Link, QColor(42, 130, 218))
+            palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
+            palette.setColor(QPalette.HighlightedText, Qt.white)
+            app.setPalette(palette)
+    
+    def apply_font_size(self, font_size: int):
+        """Применить размер шрифта к панелям"""
+        font = QFont()
+        font.setPointSize(font_size)
+        
+        # Применить ко всем виджетам в главном окне
+        self.setFont(font)
+        
+        # Применить к дочерним виджетам
+        for widget in self.findChildren(QWidget):
+            if isinstance(widget, (QLabel, QLineEdit, QTextEdit, QPushButton, QListWidget, QTableWidget)):
+                widget.setFont(font)
+    
     def show_settings_dialog(self):
         """Показать диалог настроек"""
         dialog = QDialog(self)
         dialog.setWindowTitle("Настройки")
         dialog.setModal(True)
-        layout = QFormLayout()
+        dialog.resize(400, 300)
+        layout = QVBoxLayout()
+        
+        # Группа внешнего вида
+        appearance_group = QGroupBox("Внешний вид")
+        appearance_layout = QFormLayout()
+        
+        # Выбор темы
+        theme_combo = QComboBox()
+        theme_combo.addItem("Светлая", "light")
+        theme_combo.addItem("Темная", "dark")
+        current_theme = db.get_setting('theme', 'light')
+        theme_index = theme_combo.findData(current_theme)
+        if theme_index >= 0:
+            theme_combo.setCurrentIndex(theme_index)
+        appearance_layout.addRow("Тема:", theme_combo)
+        
+        # Размер шрифта
+        font_size_spin = QSpinBox()
+        font_size_spin.setRange(8, 20)
+        font_size_spin.setValue(int(db.get_setting('font_size', '10')))
+        font_size_spin.setSuffix(" pt")
+        appearance_layout.addRow("Размер шрифта:", font_size_spin)
+        
+        appearance_group.setLayout(appearance_layout)
+        layout.addWidget(appearance_group)
+        
+        # Группа параметров запросов
+        requests_group = QGroupBox("Параметры запросов")
+        requests_layout = QFormLayout()
         
         # Таймаут запросов
         timeout_spin = QSpinBox()
         timeout_spin.setRange(10, 300)
         timeout_spin.setValue(int(db.get_setting('request_timeout', '30')))
-        layout.addRow("Таймаут запросов (сек):", timeout_spin)
+        timeout_spin.setSuffix(" сек")
+        requests_layout.addRow("Таймаут запросов:", timeout_spin)
         
         # Максимум результатов
         max_results_spin = QSpinBox()
         max_results_spin.setRange(1, 100)
         max_results_spin.setValue(int(db.get_setting('max_results_per_request', '10')))
-        layout.addRow("Максимум результатов:", max_results_spin)
+        requests_layout.addRow("Максимум результатов:", max_results_spin)
         
+        requests_group.setLayout(requests_layout)
+        layout.addWidget(requests_group)
+        
+        # Кнопки
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
-        layout.addRow(buttons)
+        layout.addWidget(buttons)
         
         dialog.setLayout(layout)
         
         if dialog.exec_() == QDialog.Accepted:
-            db.set_setting('request_timeout', str(timeout_spin.value()))
-            db.set_setting('max_results_per_request', str(max_results_spin.value()))
+            # Сохранить настройки
+            theme = theme_combo.currentData()
+            font_size = font_size_spin.value()
+            timeout = timeout_spin.value()
+            max_results = max_results_spin.value()
+            
+            db.set_setting('theme', theme)
+            db.set_setting('font_size', str(font_size))
+            db.set_setting('request_timeout', str(timeout))
+            db.set_setting('max_results_per_request', str(max_results))
+            
+            # Применить настройки немедленно
+            self.apply_theme(theme)
+            self.apply_font_size(font_size)
+            
             QMessageBox.information(self, "Успех", "Настройки сохранены!")
             logger.log_info("Settings updated")
     
     def show_about(self):
         """Показать информацию о программе"""
-        QMessageBox.about(
-            self,
-            "О программе ChatList",
-            "ChatList v1.0\n\n"
-            "Приложение для сравнения ответов различных нейросетей.\n\n"
-            "Позволяет отправлять один промт в несколько моделей\n"
-            "и сравнивать их ответы."
-        )
+        about_text = """
+        <h2>ChatList v1.0</h2>
+        <p><b>Приложение для сравнения ответов различных нейросетей</b></p>
+        
+        <p>ChatList позволяет отправлять один и тот же промт в несколько AI-моделей 
+        и сравнивать их ответы в удобном интерфейсе.</p>
+        
+        <h3>Основные возможности:</h3>
+        <ul>
+            <li>Отправка промтов в несколько моделей одновременно</li>
+            <li>Сравнение ответов в таблице результатов</li>
+            <li>Сохранение промтов и результатов в базе данных</li>
+            <li>Управление моделями нейросетей</li>
+            <li>Экспорт результатов в Markdown и JSON</li>
+            <li>AI-ассистент для улучшения промтов</li>
+            <li>Настройка темы и размера шрифта</li>
+        </ul>
+        
+        <h3>Поддерживаемые провайдеры:</h3>
+        <p>OpenAI, OpenRouter, DeepSeek, Groq, Anthropic, Google, Mistral и другие</p>
+        
+        <p><i>Разработано с использованием PyQt5 и Python</i></p>
+        """
+        
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("О программе ChatList")
+        msg_box.setTextFormat(Qt.RichText)
+        msg_box.setText(about_text)
+        msg_box.setIcon(QMessageBox.Information)
+        msg_box.exec_()
 
 
 def main():
     app = QApplication(sys.argv)
+    
+    # Установить иконку приложения
+    icon_path = os.path.join(os.path.dirname(__file__), "app.ico")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
+    
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())
