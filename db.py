@@ -3,11 +3,28 @@
 """
 import sqlite3
 import os
+import sys
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
 
-
-DB_NAME = "chatlist.db"
+# Определяем путь к базе данных
+# Если запущено как исполняемый файл, сохраняем в AppData пользователя
+# Иначе - в директории приложения
+if getattr(sys, 'frozen', False):
+    # Если запущено как исполняемый файл (PyInstaller)
+    # Используем AppData пользователя для Windows
+    if sys.platform == 'win32':
+        app_data_dir = os.path.join(os.getenv('APPDATA', ''), 'ChatList')
+    else:
+        # Для Linux/Mac используем домашнюю директорию
+        app_data_dir = os.path.join(os.path.expanduser('~'), '.chatlist')
+    
+    if not os.path.exists(app_data_dir):
+        os.makedirs(app_data_dir)
+    DB_NAME = os.path.join(app_data_dir, "chatlist.db")
+else:
+    # Если запущено как скрипт
+    DB_NAME = "chatlist.db"
 
 
 def get_db_connection():

@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChatList - Сравнение ответов AI моделей</title>
+    <meta name="description" content="ChatList - приложение для сравнения ответов различных нейросетей на один и тот же промт">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            text-align: center;
+            color: white;
+            padding: 60px 20px;
+        }
+        
+        header h1 {
+            font-size: 3.5em;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        header p {
+            font-size: 1.3em;
+            margin-bottom: 30px;
+            opacity: 0.95;
+        }
+        
+        .version-badge {
+            display: inline-block;
+            background: rgba(255,255,255,0.2);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            margin-bottom: 20px;
+        }
+        
+        .download-section {
+            text-align: center;
+            margin: 40px 0;
+        }
+        
+        .download-btn {
+            display: inline-block;
+            background: #4CAF50;
+            color: white;
+            padding: 18px 36px;
+            text-decoration: none;
+            border-radius: 8px;
+            font-size: 1.2em;
+            font-weight: bold;
+            margin: 10px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+        }
+        
+        .download-btn:hover {
+            background: #45a049;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.3);
+        }
+        
+        .download-btn.secondary {
+            background: #2196F3;
+        }
+        
+        .download-btn.secondary:hover {
+            background: #0b7dda;
+        }
+        
+        .content {
+            background: white;
+            border-radius: 12px;
+            padding: 40px;
+            margin: 40px 0;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+            margin: 40px 0;
+        }
+        
+        .feature {
+            padding: 25px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .feature h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 1.3em;
+        }
+        
+        .screenshot {
+            text-align: center;
+            margin: 40px 0;
+        }
+        
+        .screenshot img {
+            max-width: 100%;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .requirements {
+            background: #e3f2fd;
+            padding: 25px;
+            border-radius: 8px;
+            margin: 30px 0;
+        }
+        
+        .requirements h3 {
+            color: #1976d2;
+            margin-bottom: 15px;
+        }
+        
+        .requirements ul {
+            list-style-position: inside;
+            color: #555;
+        }
+        
+        .requirements li {
+            margin: 8px 0;
+        }
+        
+        footer {
+            text-align: center;
+            color: white;
+            padding: 40px 20px;
+            opacity: 0.9;
+        }
+        
+        .links {
+            margin: 20px 0;
+        }
+        
+        .links a {
+            color: white;
+            text-decoration: none;
+            margin: 0 15px;
+            opacity: 0.9;
+            transition: opacity 0.3s;
+        }
+        
+        .links a:hover {
+            opacity: 1;
+            text-decoration: underline;
+        }
+        
+        @media (max-width: 768px) {
+            header h1 {
+                font-size: 2.5em;
+            }
+            
+            .features {
+                grid-template-columns: 1fr;
+            }
+            
+            .download-btn {
+                display: block;
+                margin: 10px 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="version-badge">v1.0.0</div>
+            <h1>🌟 ChatList</h1>
+            <p>Сравнивайте ответы различных AI моделей на один и тот же промт</p>
+        </header>
+        
+        <div class="download-section">
+            <a href="https://github.com/YOUR_USERNAME/YOUR_REPO/releases/latest/download/ChatList-Setup-1.0.0.exe" class="download-btn">
+                📥 Скачать для Windows
+            </a>
+            <a href="https://github.com/YOUR_USERNAME/YOUR_REPO/releases/latest" class="download-btn secondary">
+                📋 Все версии
+            </a>
+        </div>
+        
+        <div class="content">
+            <h2>🎯 О приложении</h2>
+            <p>
+                ChatList — это мощное приложение для сравнения ответов различных нейросетей. 
+                Отправляйте один промт в несколько AI моделей одновременно и сравнивайте их ответы 
+                в удобном интерфейсе.
+            </p>
+            
+            <h2 style="margin-top: 40px;">✨ Основные возможности</h2>
+            <div class="features">
+                <div class="feature">
+                    <h3>🚀 Множество моделей</h3>
+                    <p>Поддержка OpenAI, OpenRouter, DeepSeek, Groq и многих других провайдеров через единый интерфейс.</p>
+                </div>
+                
+                <div class="feature">
+                    <h3>💾 Сохранение результатов</h3>
+                    <p>Сохраняйте промты и ответы в базу данных SQLite для последующего анализа и сравнения.</p>
+                </div>
+                
+                <div class="feature">
+                    <h3>📊 Удобное сравнение</h3>
+                    <p>Сравнивайте ответы разных моделей в одной таблице с возможностью выбора лучших результатов.</p>
+                </div>
+                
+                <div class="feature">
+                    <h3>📤 Экспорт данных</h3>
+                    <p>Экспортируйте результаты в Markdown или JSON для дальнейшей обработки и анализа.</p>
+                </div>
+                
+                <div class="feature">
+                    <h3>🤖 AI-ассистент</h3>
+                    <p>Встроенный помощник для улучшения и адаптации промтов под различные задачи.</p>
+                </div>
+                
+                <div class="feature">
+                    <h3>🎨 Настройки</h3>
+                    <p>Выбирайте между светлой и темной темой, настраивайте размер шрифта под себя.</p>
+                </div>
+            </div>
+            
+            <div class="requirements">
+                <h3>📋 Системные требования</h3>
+                <ul>
+                    <li>Windows 10 или новее</li>
+                    <li>100 МБ свободного места на диске</li>
+                    <li>Интернет-соединение для работы с AI моделями</li>
+                    <li>API ключи от выбранных провайдеров (OpenRouter, OpenAI и т.д.)</li>
+                </ul>
+            </div>
+            
+            <h2 style="margin-top: 40px;">🚀 Быстрый старт</h2>
+            <ol style="margin-left: 20px; line-height: 2;">
+                <li>Скачайте и установите приложение</li>
+                <li>При первом запуске автоматически создастся файл <code>.env</code></li>
+                <li>Откройте <code>.env</code> в директории установки</li>
+                <li>Добавьте ваши API ключи (например, <code>OPENROUTER_API_KEY=sk-or-v1-...</code>)</li>
+                <li>Запустите приложение и начните использовать!</li>
+            </ol>
+        </div>
+        
+        <footer>
+            <div class="links">
+                <a href="https://github.com/YOUR_USERNAME/YOUR_REPO">GitHub</a>
+                <a href="https://github.com/YOUR_USERNAME/YOUR_REPO/releases">Releases</a>
+                <a href="https://github.com/YOUR_USERNAME/YOUR_REPO/issues">Issues</a>
+                <a href="https://github.com/YOUR_USERNAME/YOUR_REPO/blob/main/README.md">Документация</a>
+            </div>
+            <p style="margin-top: 20px;">© 2026 ChatList. Открытый исходный код.</p>
+        </footer>
+    </div>
+</body>
+</html>

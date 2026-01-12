@@ -23,7 +23,8 @@ if errorlevel 1 (
 
 echo.
 echo ========================================
-echo Готово! Исполняемый файл находится в папке dist\ChatList.exe
+for /f "tokens=*" %%i in ('python -c "import version; print(version.__version__)"') do set VERSION=%%i
+echo Готово! Исполняемый файл находится в папке dist\ChatList-v%VERSION%.exe
 echo ========================================
 echo.
 echo Не забудьте создать файл .env с вашими API ключами!

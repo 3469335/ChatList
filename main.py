@@ -23,6 +23,7 @@ import os
 import markdown
 from prompt_improver import improve_prompt, APIError as PromptImproverError
 from config import get_api_key
+import version
 
 
 class MarkdownViewerDialog(QDialog):
@@ -526,7 +527,7 @@ class MainWindow(QMainWindow):
             raise
     
     def init_ui(self):
-        self.setWindowTitle("ChatList - Сравнение ответов нейросетей")
+        self.setWindowTitle(f"ChatList v{version.__version__} - Сравнение ответов нейросетей")
         self.setGeometry(100, 100, 1400, 900)
         
         # Установить иконку окна
@@ -1381,8 +1382,8 @@ class MainWindow(QMainWindow):
     
     def show_about(self):
         """Показать информацию о программе"""
-        about_text = """
-        <h2>ChatList v1.0</h2>
+        about_text = f"""
+        <h2>ChatList v{version.__version__}</h2>
         <p><b>Приложение для сравнения ответов различных нейросетей</b></p>
         
         <p>ChatList позволяет отправлять один и тот же промт в несколько AI-моделей 
@@ -1406,7 +1407,7 @@ class MainWindow(QMainWindow):
         """
         
         msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("О программе ChatList")
+        msg_box.setWindowTitle(f"О программе ChatList v{version.__version__}")
         msg_box.setTextFormat(Qt.RichText)
         msg_box.setText(about_text)
         msg_box.setIcon(QMessageBox.Information)

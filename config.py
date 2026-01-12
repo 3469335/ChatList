@@ -2,10 +2,31 @@
 Модуль для загрузки конфигурации из .env файла
 """
 import os
+import sys
+import shutil
 from dotenv import load_dotenv
 
+# Определяем путь к директории приложения
+if getattr(sys, 'frozen', False):
+    # Если запущено как исполняемый файл (PyInstaller)
+    APP_DIR = os.path.dirname(sys.executable)
+else:
+    # Если запущено как скрипт
+    APP_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Путь к .env файлу
+ENV_FILE = os.path.join(APP_DIR, '.env')
+ENV_EXAMPLE_FILE = os.path.join(APP_DIR, '.env.example')
+
+# Если .env не существует, но есть .env.example, копируем его
+if not os.path.exists(ENV_FILE) and os.path.exists(ENV_EXAMPLE_FILE):
+    try:
+        shutil.copy2(ENV_EXAMPLE_FILE, ENV_FILE)
+    except Exception:
+        pass  # Игнорируем ошибки копирования
+
 # Загружаем переменные окружения из .env файла
-load_dotenv()
+load_dotenv(ENV_FILE)
 
 
 def get_api_key(api_id: str) -> str:

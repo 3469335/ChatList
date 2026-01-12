@@ -1,0 +1,118 @@
+; Inno Setup Script для ChatList
+; Скрипт установки и удаления приложения
+; Версия автоматически подставляется из version.py
+
+#define AppName "ChatList"
+#define AppPublisher "ChatList"
+#define AppURL "https://github.com/yourusername/ChatList"
+#define AppVersion "{{VERSION}}"
+#define AppExeName "ChatList-v{{VERSION}}.exe"
+#define AppId "APPID_PLACEHOLDER"
+
+[Setup]
+; Основные настройки
+AppId={#AppId}
+AppName={#AppName}
+AppVersion={#AppVersion}
+AppVerName={#AppName} {#AppVersion}
+AppPublisher={#AppPublisher}
+AppPublisherURL={#AppURL}
+AppSupportURL={#AppURL}
+AppUpdatesURL={#AppURL}
+DefaultDirName={autopf}\{#AppName}
+DefaultGroupName={#AppName}
+AllowNoIcons=yes
+LicenseFile=
+InfoBeforeFile=
+InfoAfterFile=
+OutputDir=installer
+OutputBaseFilename=ChatList-Setup-{#AppVersion}
+SetupIconFile=app.ico
+Compression=lzma
+SolidCompression=yes
+WizardStyle=modern
+PrivilegesRequired=admin
+ArchitecturesInstallIn64BitMode=x64
+DisableProgramGroupPage=yes
+UninstallDisplayIcon={app}\{#AppExeName}
+
+[Languages]
+Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+
+[Files]
+; Основной исполняемый файл
+Source: "dist\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+; Иконка приложения
+Source: "app.ico"; DestDir: "{app}"; Flags: ignoreversion
+; Файл README (если есть)
+Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion; DestName: "README.txt"
+; Файл LICENSE (если есть)
+Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+; Шаблон файла с API ключами
+Source: ".env.example"; DestDir: "{app}"; Flags: ignoreversion
+
+[Icons]
+Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\app.ico"
+Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon; IconFilename: "{app}\app.ico"
+Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: quicklaunchicon; IconFilename: "{app}\app.ico"
+
+[Run]
+Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[UninstallDelete]
+; Удаление файлов при деинсталляции
+Type: filesandordirs; Name: "{app}"
+; Удаление данных пользователя (база данных, логи, настройки)
+Type: filesandordirs; Name: "{userappdata}\{#AppName}"
+Type: filesandordirs; Name: "{localappdata}\{#AppName}"
+
+[Code]
+// Функция для проверки, запущена ли программа
+function InitializeUninstall(): Boolean;
+var
+  ErrorCode: Integer;
+begin
+  // Проверяем, не запущена ли программа
+  if CheckForMutexes('ChatListMutex') then
+  begin
+    if MsgBox('Программа ChatList запущена. Пожалуйста, закройте её перед удалением.', mbError, MB_OK) = IDOK then
+    begin
+      Result := False;
+    end;
+  end
+  else
+    Result := True;
+end;
+
+// Функция для удаления дополнительных файлов
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  AppDataPath: String;
+  LocalAppDataPath: String;
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    // Удаление базы данных и логов из AppData
+    AppDataPath := ExpandConstant('{userappdata}\{#AppName}');
+    LocalAppDataPath := ExpandConstant('{localappdata}\{#AppName}');
+    
+    if DirExists(AppDataPath) then
+      DelTree(AppDataPath, True, True, True);
+    
+    if DirExists(LocalAppDataPath) then
+      DelTree(LocalAppDataPath, True, True, True);
+    
+    // Удаление файлов из текущей директории пользователя (если есть)
+    if FileExists(ExpandConstant('{userdocs}\chatlist.db')) then
+      DeleteFile(ExpandConstant('{userdocs}\chatlist.db'));
+    
+    if DirExists(ExpandConstant('{userdocs}\logs')) then
+      DelTree(ExpandConstant('{userdocs}\logs'), True, True, True);
+  end;
+end;

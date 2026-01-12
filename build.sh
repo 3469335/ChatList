@@ -3,9 +3,10 @@ echo "Установка зависимостей..."
 pip install -r requirements.txt
 
 echo ""
-echo "Сборка исполняемого файла..."
-pyinstaller --onefile --windowed --name "PyQtApp" --icon=NONE main.py
+VERSION=$(python -c "import version; print(version.__version__)")
+echo "Сборка исполняемого файла версии $VERSION..."
+pyinstaller PyQtApp.spec
 
 echo ""
-echo "Готово! Исполняемый файл находится в папке dist/PyQtApp"
+echo "Готово! Исполняемый файл находится в папке dist/ChatList-v${VERSION}"
 

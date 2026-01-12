@@ -4,6 +4,7 @@
 import logging
 import os
 from datetime import datetime
+import version
 
 # Создаем директорию для логов, если её нет
 LOG_DIR = "logs"
@@ -15,7 +16,7 @@ LOG_FILE = os.path.join(LOG_DIR, f"chatlist_{datetime.now().strftime('%Y%m%d')}.
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format=f'%(asctime)s - ChatList v{version.__version__} - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler(LOG_FILE, encoding='utf-8'),
         logging.StreamHandler()
@@ -23,6 +24,9 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger('ChatList')
+
+# Логировать версию при старте
+logger.info(f"ChatList v{version.__version__} started")
 
 
 def log_api_request(model_name: str, prompt: str, success: bool, error: str = None):

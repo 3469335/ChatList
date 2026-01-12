@@ -102,9 +102,13 @@ def send_openrouter_request(model_name: str, prompt: str, api_key: str) -> str:
     Returns:
         Текст ответа модели
     """
+    # Проверка наличия API ключа
+    if not api_key or api_key.strip() == "":
+        raise APIError("OpenRouter API error: API key is empty or not provided")
+    
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
-        "Authorization": f"Bearer {api_key}",
+        "Authorization": f"Bearer {api_key.strip()}",
         "Content-Type": "application/json",
         "HTTP-Referer": "https://github.com/chatlist-app",  # Опционально
         "X-Title": "ChatList"  # Опционально
@@ -124,6 +128,13 @@ def send_openrouter_request(model_name: str, prompt: str, api_key: str) -> str:
         )
         
         # Улучшенная обработка ошибок
+        if response.status_code == 401:
+            error_data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
+            error_msg = error_data.get('error', {}).get('message', 'Unauthorized')
+            if 'cookie' in error_msg.lower() or 'credential' in error_msg.lower():
+                raise APIError(f"OpenRouter API error: Invalid or missing API key. Please check your OPENROUTER_API_KEY in .env file. Error: {error_msg}")
+            raise APIError(f"OpenRouter API error: Unauthorized (401). {error_msg}")
+        
         if response.status_code == 404:
             error_data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
             error_msg = error_data.get('error', {}).get('message', 'Model not found')
@@ -146,6 +157,11 @@ def send_openrouter_request(model_name: str, prompt: str, api_key: str) -> str:
                 error_data = e.response.json()
                 if 'error' in error_data:
                     error_msg = error_data['error'].get('message', error_msg)
+                    # Специальная обработка ошибки с cookie/auth
+                    if 'cookie' in error_msg.lower() or 'credential' in error_msg.lower() or 'auth' in error_msg.lower():
+                        raise APIError(f"OpenRouter API authentication error: {error_msg}. Please verify your OPENROUTER_API_KEY in .env file is correct and starts with 'sk-or-v1-'.")
+            except APIError:
+                raise
             except:
                 pass
         raise APIError(f"OpenRouter API error: {error_msg}")
@@ -207,8 +223,8 @@ def send_request(model: Dict, prompt: str) -> str:
         APIError: При ошибке запроса
     """
     api_key = get_api_key(model['api_id'])
-    if not api_key:
-        raise APIError(f"API key not found for {model['api_id']}")
+    if not api_key or api_key.strip() == "":
+        raise APIError(f"API key not found or empty for {model['api_id']}. Please check your .env file and ensure the key is set correctly.")
     
     model_type = model.get('model_type', '').lower()
     model_name = model.get('name', '')

@@ -32,6 +32,13 @@ MANIFEST
 *.manifest
 *.spec
 
+# Inno Setup
+setup.iss
+installer/
+# Но оставляем .github и docs для GitHub Pages
+!.github/
+!docs/
+
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
